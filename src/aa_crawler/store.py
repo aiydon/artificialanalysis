@@ -298,8 +298,11 @@ class Store:
                 "SELECT dataset, COUNT(*) AS active FROM latest GROUP BY dataset ORDER BY dataset"
             )
         ]
+        last_run = dict(run) if run else None
+        if last_run and isinstance(last_run.get("totals"), str):
+            last_run["totals"] = json.loads(last_run["totals"])
         return {
-            "last_run": dict(run) if run else None,
+            "last_run": last_run,
             "active_records": sum(row["active"] for row in datasets),
             "datasets": datasets,
         }
