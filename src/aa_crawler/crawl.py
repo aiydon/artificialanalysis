@@ -1,81 +1,153 @@
 from __future__ import annotations
 
-import json
 import logging
 import random
+import sys
 import time
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from pydantic import BaseModel
+from tqdm import tqdm
 
 from .config import Settings
+from .extract import extract
 from .fetch import Fetcher
-from .sources import SOURCES, dataset_names, extract
-from .store import Store, export_latest
+from .sources import SOURCES, pages
+from .store import Store, export_latest, write_manifest
 
 log = logging.getLogger(__name__)
 FAILURE_RETRY_CAP = 300.0
 
 
 def utcnow() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-@dataclass(frozen=True)
-class RunReport:
+class RunReport(BaseModel):
     run_id: int
     status: str
-    counts: dict[str, int]
+    started_at: str
+    finished_at: str
+    duration: float
+    pages: int
+    datasets_total: int
+    datasets_ok: int
+    datasets_failed: int
+    records: int
+    inserted: int
+    updated: int
+    unchanged: int
+    removed: int
     errors: dict[str, str]
 
-    def summary(self) -> str:
-        parts = [f"run #{self.run_id}: {self.status}"]
-        parts += [f"{name}={count}" for name, count in self.counts.items()]
-        if self.errors:
-            parts.append(f"errors={list(self.errors)}")
-        return ", ".join(parts)
+    def summary_line(self, next_at: str | None = None) -> str:
+        stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        parts = [
+            stamp,
+            self.status,
+            f"{self.datasets_ok}/{self.datasets_total} datasets",
+            f"{self.records:,} records",
+            f"+{self.inserted:,} new",
+            f"~{self.updated:,} changed",
+            f"-{self.removed:,} removed",
+            f"{self.duration:.1f}s",
+        ]
+        if next_at:
+            parts.append(f"next {next_at}")
+        return " | ".join(parts)
+
+    def error_line(self) -> str:
+        errors = [f"{name}: {message}" for name, message in self.errors.items()]
+        return "  errors: " + "; ".join(errors)[:800]
 
 
 def run_once(settings: Settings, store: Store) -> RunReport:
     started_at = utcnow()
+    clock = time.monotonic()
     run_id = store.begin(started_at)
-    counts: dict[str, int] = {}
+    grouped = pages()
+    totals = {"records": 0, "inserted": 0, "updated": 0, "unchanged": 0, "removed": 0}
     errors: dict[str, str] = {}
+    ok_datasets: list[str] = []
 
+    progress = tqdm(
+        total=len(grouped),
+        desc="crawl",
+        unit="page",
+        leave=False,
+        disable=None,
+        file=sys.stderr,
+    )
     try:
         with Fetcher(settings.proxy, settings.timeout, settings.retries) as fetcher:
-            for source in SOURCES:
+            for path, sources in grouped.items():
+                progress.set_postfix_str(sources[0].group)
                 try:
-                    html = fetcher.get(source.path)
-                    rows = extract(html, source)
-                    store.add_dataset(run_id, source.dataset, rows, started_at)
-                    counts[source.dataset] = len(rows)
-                    log.info("%-14s %4d records", source.dataset, len(rows))
+                    html = fetcher.get(path)
                 except Exception as exc:
-                    errors[source.dataset] = f"{type(exc).__name__}: {exc}"
-                    store.fail_dataset(run_id, source.dataset, errors[source.dataset])
-                    log.error("%-14s failed: %s", source.dataset, exc)
+                    message = f"{type(exc).__name__}: {exc}"
+                    for source in sources:
+                        store.fail_dataset(run_id, source.dataset, message)
+                        errors[source.dataset] = message
+                    progress.update(1)
+                    continue
 
-        if not counts:
-            status = "failed"
-        elif errors:
-            status = "partial"
-        else:
-            status = "ok"
-        store.finish(
-            run_id,
-            utcnow(),
-            status,
-            {"counts": counts, "errors": errors},
-        )
+                for source in sources:
+                    try:
+                        rows = extract(html, source)
+                        stats = store.apply_dataset(
+                            run_id, source.dataset, rows, observed_at=started_at
+                        )
+                        ok_datasets.append(source.dataset)
+                        for field in totals:
+                            totals[field] += getattr(stats, field)
+                    except Exception as exc:
+                        message = f"{type(exc).__name__}: {exc}"
+                        store.fail_dataset(run_id, source.dataset, message)
+                        errors[source.dataset] = message
+                progress.update(1)
+    finally:
+        progress.close()
 
-        if counts:
-            written = export_latest(store, settings.export_dir, counts)
-            log.info("exported %s to %s", written, settings.export_dir)
-    except Exception as exc:
-        store.finish(run_id, utcnow(), "failed", {"counts": counts, "errors": {"crawl": str(exc)}})
-        raise
+    datasets_total = len(ok_datasets) + len(errors)
+    if not ok_datasets:
+        status = "failed"
+    elif errors:
+        status = "partial"
+    else:
+        status = "ok"
 
-    return RunReport(run_id, status, counts, errors)
+    finished_at = utcnow()
+    report = RunReport(
+        run_id=run_id,
+        status=status,
+        started_at=started_at,
+        finished_at=finished_at,
+        duration=time.monotonic() - clock,
+        pages=len(grouped),
+        datasets_total=datasets_total,
+        datasets_ok=len(ok_datasets),
+        datasets_failed=len(errors),
+        errors=errors,
+        **totals,
+    )
+    store.finish(
+        run_id,
+        finished_at,
+        status,
+        {"pages": len(grouped), "datasets_ok": len(ok_datasets), **totals, "errors": errors},
+    )
+
+    if ok_datasets:
+        try:
+            export_latest(store, settings.export_dir, ok_datasets)
+            write_manifest(store, settings.data_dir / "datasets.json", SOURCES)
+        except Exception:
+            log.exception("export failed")
+
+    return report
 
 
 def _next_delay(settings: Settings, failures: int) -> float:
@@ -87,30 +159,32 @@ def _next_delay(settings: Settings, failures: int) -> float:
     return max(1.0, delay)
 
 
-def run_forever(settings: Settings, store: Store) -> None:
+def next_run_at(delay: float) -> str:
+    target = datetime.now().astimezone() + timedelta(seconds=delay)
+    return target.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def run_forever(settings: Settings, store: Store, echo: Callable[[str], Any] = print) -> None:
     failures = 0
-    log.info(
-        "daemon started: interval=%.0fs datasets=%s",
-        settings.interval,
-        ",".join(dataset_names()),
-    )
     while True:
         try:
             report = run_once(settings, store)
             failures = 0 if report.status != "failed" else failures + 1
-            log.info(report.summary())
-        except Exception:
+        except Exception as exc:
             failures += 1
             log.exception("crawl run crashed")
+            echo(f"{datetime.now():%Y-%m-%d %H:%M:%S} | failed | {type(exc).__name__}: {exc}")
+            report = None
 
         delay = _next_delay(settings, failures)
-        log.info("next crawl at %s (in %.0fs)", utcnow(), delay)
+        next_at = next_run_at(delay)
+        if report is not None:
+            echo(report.summary_line(next_at))
+            if report.errors:
+                echo(report.error_line())
+
         try:
             time.sleep(delay)
         except KeyboardInterrupt:
-            log.info("daemon stopped")
+            echo("daemon stopped")
             return
-
-
-def print_stats(store: Store) -> None:
-    print(json.dumps(store.stats(), indent=2))

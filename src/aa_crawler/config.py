@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict
+
 BASE_URL = "https://artificialanalysis.ai"
-DEFAULT_INTERVAL = 6 * 60 * 60.0
+
+# The changelog shows several evaluation batches per day; two hours keeps the
+# dashboard fresh without re-downloading ~25 MB of pages more often than useful.
+DEFAULT_INTERVAL = 2 * 60 * 60.0
 
 
-@dataclass(frozen=True)
-class Settings:
+class Settings(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     data_dir: Path = Path("data")
     proxy: str | None = None
     timeout: float = 60.0
