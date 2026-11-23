@@ -6,17 +6,18 @@
 
 ## 覆盖范围
 
-| dataset | 页面 | 记录数（约） | 内容 |
-| --- | --- | ---: | --- |
-| `llm_models` | `/leaderboards/models` | 289 | LLM 综合智能指数、各项评测分数、价格、速度、上下文 |
-| `llm_providers` | `/leaderboards/providers` | 501 | 同一模型在各 API 供应商的价格、延迟、吞吐、错误率 |
-| `image_models` | `/image/models` | 202 | 文生图 / 图像编辑模型 Elo、置信区间、价格 |
-| `video_models` | `/video/models` | 179 | 文/图生视频、视频编辑（含音频）Elo、价格 |
-| `stt_models` | `/speech-to-text` | 68 | 语音识别模型 WER、速度、价格 |
-| `tts_models` | `/text-to-speech` | 114 | 语音合成模型 Elo、延迟、价格 |
-| `music_models` | `/music` | 14 | 音乐生成模型 Elo、排名 |
+33 个页面、69 个数据集、7,174 条记录（其中 9 个 `*_slices` 数据集默认不显示在看板里）：
 
-记录保留站点原始字段（嵌套结构），并额外带上 `_dataset`、`_key`、`_observed_at`（或 `task`，图片/视频多榜单时）。
+| 分组 | 数据集 | 内容 |
+| --- | ---: | --- |
+| `llm` | 16 | 语言模型主榜（289）、API endpoint（501）、模型发布（537）、评测目录、6 个行业 index、decision/chatbot/coding/search 元数据 |
+| `image` | 8 | 文生图/编辑模型（202）、API endpoint（78）、两个 arena 主榜、tag、子榜切片 |
+| `video` | 10 | 6 类视频任务（179）、API endpoint（35）、三个 arena 主榜、tag、子榜切片 |
+| `speech` | 14 | STT 非流式/流式、TTS 主榜与分类分、TTS/S2S arena、模型家族、口音、子榜切片 |
+| `music` | 4 | 人声 / 器乐 arena 与子榜切片 |
+| `agents` | 3 | Chatbot、Coding Agent、Search API 榜单 |
+| `hardware` | 7 | GPU 租价、数据中心容量测试、笔记本推理、**3,250 条手机端逐项测量** |
+| `other` | 7 | 3D、micro-evals、站点 changelog |
 
 完整列表：`make datasets`。
 
@@ -34,7 +35,7 @@
 - `runs` / `dataset_runs`：每次运行和每个数据集的新增、变化、删除、耗时、错误。
 - `latest` 视图：`active=1` 的当前快照。
 
-## 输出
+实测：首次全量约 28 MB；第二次抓取 0 新增 / 0 变化，数据库不增长。旧版（v1）数据库会自动改名为 `data/aa.legacy-*.db`。
 
 ## 抓取频率
 
@@ -142,4 +143,7 @@ web/
 
 ## 限制
 
-## 说明
+- 未逐页抓取 2,435 个模型详情页和 57 个 provider 详情页：它们展示的指标已汇总在榜单与 endpoint 数据中，逐页抓取会让每轮请求量放大两个数量级。
+- arena 页面按 tag/口音/语言切分的 201 张子榜表作为 `*_slices` 原始数据集入库，默认不显示在看板列表中；投票 UI（`/image/arena`、`/video/arena` 等）本身不下发数据。
+- 官方 `/api/v2` 是付费 API；本项目抓公开页面，若站点改版会报 `property ... not found`，更新 `sources.py` 即可。
+- 数据版权归 Artificial Analysis，请低频抓取，仅用于研究与个人分析。
