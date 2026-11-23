@@ -3,7 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
     <title>AA Data Board</title>
+    <script>
+      (() => {
+        try {
+          const saved = localStorage.getItem("aa-theme");
+          document.documentElement.dataset.theme =
+            saved || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+        } catch {
+          document.documentElement.dataset.theme = "dark";
+        }
+      })();
+    </script>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
@@ -26,6 +38,7 @@
           <select id="dataset" disabled></select>
         </label>
         <label class="check raw-toggle"> <input id="raw" type="checkbox" /> 显示原始子榜 </label>
+        <label class="check raw-toggle"> <input id="auto" type="checkbox" /> 自动刷新 60s </label>
         <nav class="tabs" id="tabs">
           <button data-tab="leaderboard" class="active">Leaderboard</button>
           <button data-tab="trends">Trends</button>
@@ -43,7 +56,12 @@
             <h1 id="title">Artificial Analysis 数据总览</h1>
             <p id="subtitle" class="muted">等待数据…</p>
           </div>
-          <div id="run-badge" class="badge">…</div>
+          <div class="top-actions">
+            <button id="theme" class="icon" title="切换明暗主题" aria-label="切换明暗主题">
+              ☾
+            </button>
+            <div id="run-badge" class="badge">…</div>
+          </div>
         </header>
 
         <section id="kpis" class="kpis"></section>
@@ -141,6 +159,7 @@
         </section>
       </main>
     </div>
+    <div id="loading" class="loading" hidden></div>
     <div id="toast" class="toast" hidden></div>
     <script type="module" src="./app.ts"></script>
   </body>

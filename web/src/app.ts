@@ -135,24 +135,29 @@ const CREATOR_PRIORITY = [
   "providerName",
   "model.creator.name",
 ];
-const PALETTE = [
-  "#6ea8fe",
-  "#38d39f",
-  "#ffb454",
-  "#ff6b7a",
-  "#c792ea",
-  "#7fdbff",
-  "#f78c6c",
-  "#8bd17c",
-  "#e5c07b",
-  "#56b6c2",
-  "#d19a66",
-  "#be95ff",
-];
-const AXIS = "#233252";
-const GRID = "#1a253c";
-const MUTED = "#8ea0bf";
-const FG = "#e8eefb";
+interface ThemeColors {
+  axis: string;
+  grid: string;
+  muted: string;
+  fg: string;
+  tooltip: string;
+  palette: string[];
+}
+
+function themeColors(): ThemeColors {
+  const styles = getComputedStyle(document.documentElement);
+  const read = (name: string, fallback: string): string =>
+    styles.getPropertyValue(name).trim() || fallback;
+  return {
+    axis: read("--chart-axis", "#233252"),
+    grid: read("--chart-grid", "#1a253c"),
+    muted: read("--muted", "#8ea0bf"),
+    fg: read("--fg", "#e8eefb"),
+    tooltip: read("--chart-tooltip", "#162138"),
+    palette: Array.from({ length: 12 }, (_, index) => read(`--chart-${index + 1}`, "#6ea8fe")),
+  };
+}
+
 const MAX_TABLE_ROWS = 200;
 
 const state: {
@@ -198,6 +203,10 @@ let loadToken = 0;
 let historyToken = 0;
 let runsToken = 0;
 let searchTimer: number | undefined;
+let busyCount = 0;
+let refreshing = false;
+let restoredUi = false;
+let autoTimer: number | undefined;
 
 function el<T extends HTMLElement>(selector: string): T {
   const node = document.querySelector<T>(selector);
@@ -363,33 +372,69 @@ function renderKpis(): void {
     : "只读 SQLite";
 }
 
-function table(
-  container: HTMLElement,
-  columns: string[],
-  rows: Array<Record<string, unknown>>,
-  limit = MAX_TABLE_ROWS,
-): void {
+interface TableState {
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  limit: number;
+  sort: { column: string; direction: 1 | -1 } | null;
+}
+
+const tableStates = new WeakMap<HTMLElement, TableState>();
+
+function compareCells(left: unknown, right: unknown): number {
+  if (left === right) return 0;
+  if (left === null || left === undefined) return 1;
+  if (right === null || right === undefined) return -1;
+  if (typeof left === "number" && typeof right === "number") return left - right;
+  return String(left).localeCompare(String(right), undefined, { numeric: true });
+}
+
+function drawTable(container: HTMLElement, tableState: TableState): void {
   container.replaceChildren();
-  if (!rows.length) {
+  if (!tableState.rows.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
     empty.textContent = "没有数据";
     container.append(empty);
     return;
   }
+  const rows = tableState.sort
+    ? [...tableState.rows].sort(
+        (left, right) =>
+          compareCells(left[tableState.sort!.column], right[tableState.sort!.column]) *
+          tableState.sort!.direction,
+      )
+    : tableState.rows;
+
   const element = document.createElement("table");
   const head = document.createElement("thead");
   const headRow = document.createElement("tr");
-  for (const column of columns) {
+  for (const column of tableState.columns) {
     const cell = document.createElement("th");
+    cell.className = "sortable";
     cell.textContent = column;
+    cell.title = "点击排序";
+    if (tableState.sort?.column === column) {
+      const mark = document.createElement("span");
+      mark.className = "sort-mark";
+      mark.textContent = tableState.sort.direction === 1 ? "▲" : "▼";
+      cell.append(mark);
+    }
+    cell.addEventListener("click", () => {
+      tableState.sort =
+        tableState.sort?.column === column
+          ? { column, direction: tableState.sort.direction === 1 ? -1 : 1 }
+          : { column, direction: 1 };
+      drawTable(container, tableState);
+    });
     headRow.append(cell);
   }
   head.append(headRow);
+
   const body = document.createElement("tbody");
-  for (const row of rows.slice(0, limit)) {
+  for (const row of rows.slice(0, tableState.limit)) {
     const tr = document.createElement("tr");
-    for (const column of columns) {
+    for (const column of tableState.columns) {
       const td = document.createElement("td");
       const value = row[column];
       td.textContent = formatValue(value);
@@ -402,9 +447,25 @@ function table(
   container.append(element);
 }
 
+function table(
+  container: HTMLElement,
+  columns: string[],
+  rows: Array<Record<string, unknown>>,
+  limit = MAX_TABLE_ROWS,
+): void {
+  const previous = tableStates.get(container);
+  const tableState: TableState =
+    previous && previous.columns.join("\u0000") === columns.join("\u0000")
+      ? { ...previous, rows, limit }
+      : { columns, rows, limit, sort: null };
+  tableStates.set(container, tableState);
+  drawTable(container, tableState);
+}
+
 function renderOverview(): void {
   const summary = state.summary;
   if (!summary) return;
+  const colors = themeColors();
 
   const runs = summary.runs;
   const runChart = chartFor("runs-chart");
@@ -414,25 +475,25 @@ function renderOverview(): void {
       grid: { left: 48, right: 20, top: 20, bottom: 36 },
       tooltip: {
         trigger: "axis",
-        backgroundColor: "#162138",
-        borderColor: AXIS,
-        textStyle: { color: FG },
+        backgroundColor: colors.tooltip,
+        borderColor: colors.axis,
+        textStyle: { color: colors.fg },
       },
       legend: {
         bottom: 0,
-        textStyle: { color: MUTED },
+        textStyle: { color: colors.muted },
         icon: "roundRect",
       },
       xAxis: {
         type: "category",
         data: runs.map((run) => `#${run.id}`),
-        axisLine: { lineStyle: { color: AXIS } },
-        axisLabel: { color: MUTED },
+        axisLine: { lineStyle: { color: colors.axis } },
+        axisLabel: { color: colors.muted },
       },
       yAxis: {
         type: "value",
-        axisLabel: { color: MUTED },
-        splitLine: { lineStyle: { color: GRID } },
+        axisLabel: { color: colors.muted },
+        splitLine: { lineStyle: { color: colors.grid } },
       },
       series: [
         {
@@ -441,8 +502,8 @@ function renderOverview(): void {
           smooth: true,
           showSymbol: false,
           data: runs.map((run) => run.totals?.inserted ?? 0),
-          lineStyle: { width: 2, color: PALETTE[0] },
-          itemStyle: { color: PALETTE[0] },
+          lineStyle: { width: 2, color: colors.palette[0] },
+          itemStyle: { color: colors.palette[0] },
           areaStyle: { opacity: 0.08 },
         },
         {
@@ -451,8 +512,8 @@ function renderOverview(): void {
           smooth: true,
           showSymbol: false,
           data: runs.map((run) => run.totals?.updated ?? 0),
-          lineStyle: { width: 2, color: PALETTE[1] },
-          itemStyle: { color: PALETTE[1] },
+          lineStyle: { width: 2, color: colors.palette[1] },
+          itemStyle: { color: colors.palette[1] },
         },
         {
           name: "removed",
@@ -460,8 +521,8 @@ function renderOverview(): void {
           smooth: true,
           showSymbol: false,
           data: runs.map((run) => run.totals?.removed ?? 0),
-          lineStyle: { width: 2, color: PALETTE[3] },
-          itemStyle: { color: PALETTE[3] },
+          lineStyle: { width: 2, color: colors.palette[3] },
+          itemStyle: { color: colors.palette[3] },
         },
       ],
     },
@@ -539,7 +600,7 @@ function fillDatasetSelect(): void {
   for (const item of items) {
     const option = document.createElement("option");
     option.value = item.dataset;
-    option.textContent = `${item.dataset} · ${item.label}`;
+    option.textContent = `${item.dataset} · ${item.label} (${item.count.toLocaleString()})`;
     select.append(option);
   }
   const selected =
@@ -556,7 +617,8 @@ function fillDatasetSelect(): void {
   select.disabled = false;
 }
 
-function fillMetricSelects(): void {
+function fillMetricSelects(preserve: boolean): void {
+  const previousY = state.y;
   const ySelect = el<HTMLSelectElement>("#metric-y");
   ySelect.replaceChildren();
   for (const metric of state.numeric) {
@@ -565,12 +627,14 @@ function fillMetricSelects(): void {
     option.textContent = metric;
     ySelect.append(option);
   }
-  state.y = pick(state.numeric, Y_PRIORITY);
+  state.y =
+    preserve && state.numeric.includes(previousY) ? previousY : pick(state.numeric, Y_PRIORITY);
   ySelect.value = state.y;
-  refreshXOptions();
+  refreshXOptions(preserve);
 }
 
-function refreshXOptions(): void {
+function refreshXOptions(preserve = false): void {
+  const previousX = state.x;
   const xSelect = el<HTMLSelectElement>("#metric-x");
   const options = state.numeric.filter((metric) => metric !== state.y);
   xSelect.replaceChildren();
@@ -580,7 +644,7 @@ function refreshXOptions(): void {
     option.textContent = metric;
     xSelect.append(option);
   }
-  state.x = pick(options, X_PRIORITY);
+  state.x = preserve && options.includes(previousX) ? previousX : pick(options, X_PRIORITY);
   xSelect.value = state.x;
 }
 
@@ -596,6 +660,7 @@ function filteredRows(): FlatRow[] {
 
 function renderBar(rows: FlatRow[]): void {
   const chart = chartFor("bar-chart");
+  const colors = themeColors();
   const points = rows
     .map((row) => ({ row, value: toNumber(row[state.y]) }))
     .filter((point) => Number.isFinite(point.value))
@@ -613,9 +678,9 @@ function renderBar(rows: FlatRow[]): void {
       tooltip: {
         trigger: "axis",
         axisPointer: { type: "shadow" },
-        backgroundColor: "#162138",
-        borderColor: AXIS,
-        textStyle: { color: FG },
+        backgroundColor: colors.tooltip,
+        borderColor: colors.axis,
+        textStyle: { color: colors.fg },
         formatter: (params: unknown) => {
           const items = params as Array<{ dataIndex: number }>;
           const point = points[items[0]?.dataIndex ?? 0];
@@ -628,16 +693,16 @@ function renderBar(rows: FlatRow[]): void {
       },
       xAxis: {
         type: "value",
-        axisLine: { lineStyle: { color: AXIS } },
-        axisLabel: { color: MUTED },
-        splitLine: { lineStyle: { color: GRID } },
+        axisLine: { lineStyle: { color: colors.axis } },
+        axisLabel: { color: colors.muted },
+        splitLine: { lineStyle: { color: colors.grid } },
       },
       yAxis: {
         type: "category",
         data: points.map((point) => String(point.row[state.name] ?? point.row._key)),
         axisLine: { show: false },
         axisTick: { show: false },
-        axisLabel: { color: FG, width: 160, overflow: "truncate" },
+        axisLabel: { color: colors.fg, width: 160, overflow: "truncate" },
       },
       series: [
         {
@@ -646,10 +711,7 @@ function renderBar(rows: FlatRow[]): void {
           barMaxWidth: 18,
           itemStyle: {
             borderRadius: [0, 6, 6, 0],
-            color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-              { offset: 0, color: "#3c6fd6" },
-              { offset: 1, color: "#6ea8fe" },
-            ]),
+            color: colors.palette[0],
           },
         },
       ],
@@ -660,6 +722,7 @@ function renderBar(rows: FlatRow[]): void {
 
 function renderScatter(rows: FlatRow[]): void {
   const chart = chartFor("scatter-chart");
+  const colors = themeColors();
   const points = rows
     .map((row) => ({
       row,
@@ -699,14 +762,14 @@ function renderScatter(rows: FlatRow[]): void {
       legend: {
         type: "scroll",
         bottom: 0,
-        textStyle: { color: MUTED },
-        pageTextStyle: { color: MUTED },
+        textStyle: { color: colors.muted },
+        pageTextStyle: { color: colors.muted },
       },
       tooltip: {
         trigger: "item",
-        backgroundColor: "#162138",
-        borderColor: AXIS,
-        textStyle: { color: FG },
+        backgroundColor: colors.tooltip,
+        borderColor: colors.axis,
+        textStyle: { color: colors.fg },
         formatter: (params: unknown) => {
           const item = params as {
             data?: { value?: [number, number]; name?: string; key?: string; creator?: string };
@@ -718,32 +781,32 @@ function renderScatter(rows: FlatRow[]): void {
             `${escapeHtml(data.creator)}`,
             `${escapeHtml(state.x)}: ${formatValue(data.value[0])}`,
             `${escapeHtml(state.y)}: ${formatValue(data.value[1])}`,
-            `<span style="color:${MUTED}">${escapeHtml(data.key)}</span>`,
+            `<span style="color:${colors.muted}">${escapeHtml(data.key)}</span>`,
           ].join("<br/>");
         },
       },
       xAxis: {
         type: state.logX ? "log" : "value",
         name: state.x,
-        nameTextStyle: { color: MUTED, fontSize: 10 },
-        axisLine: { lineStyle: { color: AXIS } },
-        axisLabel: { color: MUTED },
-        splitLine: { lineStyle: { color: GRID } },
+        nameTextStyle: { color: colors.muted, fontSize: 10 },
+        axisLine: { lineStyle: { color: colors.axis } },
+        axisLabel: { color: colors.muted },
+        splitLine: { lineStyle: { color: colors.grid } },
       },
       yAxis: {
         type: "value",
         name: state.y,
-        nameTextStyle: { color: MUTED, fontSize: 10 },
-        axisLine: { lineStyle: { color: AXIS } },
-        axisLabel: { color: MUTED },
-        splitLine: { lineStyle: { color: GRID } },
+        nameTextStyle: { color: colors.muted, fontSize: 10 },
+        axisLine: { lineStyle: { color: colors.axis } },
+        axisLabel: { color: colors.muted },
+        splitLine: { lineStyle: { color: colors.grid } },
         scale: true,
       },
       series: [...grouped.entries()].map(([name, group], index) => ({
         name,
         type: "scatter",
         symbolSize: name === "其他" ? 6 : 9,
-        itemStyle: { color: PALETTE[index % PALETTE.length], opacity: 0.85 },
+        itemStyle: { color: colors.palette[index % colors.palette.length], opacity: 0.85 },
         emphasis: { focus: "series" },
         data: group.map((point) => ({
           value: [point.x, point.y],
@@ -805,9 +868,10 @@ function downloadCsv(): void {
   URL.revokeObjectURL(link.href);
 }
 
-async function loadDataset(dataset: string, force = false): Promise<void> {
+async function loadDataset(dataset: string, force = false, resetView = true): Promise<void> {
   if (!dataset) return;
   const token = ++loadToken;
+  setBusy(true);
   try {
     const data = await getJSON<RecordsResponse>(
       `/api/records?dataset=${encodeURIComponent(dataset)}${force ? "&refresh=1" : ""}`,
@@ -823,20 +887,24 @@ async function loadDataset(dataset: string, force = false): Promise<void> {
     const columns = scalarColumns(state.flat);
     state.name = pick(columns, NAME_PRIORITY) || "_key";
     state.creator = pick(columns, CREATOR_PRIORITY) || "";
-    state.trendKey = "";
-    state.search = "";
-    el<HTMLInputElement>("#search").value = "";
+    if (resetView) {
+      state.trendKey = "";
+      state.search = "";
+      el<HTMLInputElement>("#search").value = "";
+    }
 
     const meta = state.summary?.datasets.find((item) => item.dataset === dataset);
     el<HTMLElement>("#title").textContent = meta?.label ?? dataset;
     el<HTMLElement>("#subtitle").textContent =
       `${dataset} · ${state.flat.length.toLocaleString()} 条记录`;
-    fillMetricSelects();
+    fillMetricSelects(!resetView);
     renderLeaderboard();
     if (state.tab === "trends") await loadTrend();
     if (state.tab === "runs") await loadRuns();
   } catch (error) {
     toast(`读取 ${dataset} 失败: ${error instanceof Error ? error.message : error}`, true);
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -868,6 +936,7 @@ async function loadHistory(): Promise<void> {
   if (!state.dataset || !state.trendKey) return;
   const token = ++historyToken;
   const chart = chartFor("trend-chart");
+  const colors = themeColors();
   try {
     const data = await getJSON<HistoryResponse>(
       `/api/history?dataset=${encodeURIComponent(state.dataset)}&key=${encodeURIComponent(
@@ -912,22 +981,22 @@ async function loadHistory(): Promise<void> {
         grid: { left: 58, right: 24, top: 30, bottom: 40 },
         tooltip: {
           trigger: "axis",
-          backgroundColor: "#162138",
-          borderColor: AXIS,
-          textStyle: { color: FG },
+          backgroundColor: colors.tooltip,
+          borderColor: colors.axis,
+          textStyle: { color: colors.fg },
         },
         xAxis: {
           type: "time",
-          axisLine: { lineStyle: { color: AXIS } },
-          axisLabel: { color: MUTED },
+          axisLine: { lineStyle: { color: colors.axis } },
+          axisLabel: { color: colors.muted },
           splitLine: { show: false },
         },
         yAxis: {
           type: "value",
           name: state.trendMetric,
-          nameTextStyle: { color: MUTED, fontSize: 10 },
-          axisLabel: { color: MUTED },
-          splitLine: { lineStyle: { color: GRID } },
+          nameTextStyle: { color: colors.muted, fontSize: 10 },
+          axisLabel: { color: colors.muted },
+          splitLine: { lineStyle: { color: colors.grid } },
           scale: true,
         },
         series: [
@@ -936,8 +1005,8 @@ async function loadHistory(): Promise<void> {
             data: points.map((point) => [point.time, point.value]),
             showSymbol: true,
             symbolSize: 6,
-            lineStyle: { width: 2, color: PALETTE[0] },
-            itemStyle: { color: PALETTE[0] },
+            lineStyle: { width: 2, color: colors.palette[0] },
+            itemStyle: { color: colors.palette[0] },
             areaStyle: { opacity: 0.08 },
           },
         ],
@@ -957,6 +1026,7 @@ async function loadHistory(): Promise<void> {
 async function loadRuns(): Promise<void> {
   if (!state.dataset) return;
   const token = ++runsToken;
+  const colors = themeColors();
   try {
     const data = await getJSON<RunsResponse>(
       `/api/runs?dataset=${encodeURIComponent(state.dataset)}`,
@@ -970,21 +1040,21 @@ async function loadRuns(): Promise<void> {
         grid: { left: 44, right: 20, top: 20, bottom: 36 },
         tooltip: {
           trigger: "axis",
-          backgroundColor: "#162138",
-          borderColor: AXIS,
-          textStyle: { color: FG },
+          backgroundColor: colors.tooltip,
+          borderColor: colors.axis,
+          textStyle: { color: colors.fg },
         },
-        legend: { bottom: 0, textStyle: { color: MUTED }, icon: "roundRect" },
+        legend: { bottom: 0, textStyle: { color: colors.muted }, icon: "roundRect" },
         xAxis: {
           type: "category",
           data: runs.map((run) => `#${run.run_id}`),
-          axisLine: { lineStyle: { color: AXIS } },
-          axisLabel: { color: MUTED },
+          axisLine: { lineStyle: { color: colors.axis } },
+          axisLabel: { color: colors.muted },
         },
         yAxis: {
           type: "value",
-          axisLabel: { color: MUTED },
-          splitLine: { lineStyle: { color: GRID } },
+          axisLabel: { color: colors.muted },
+          splitLine: { lineStyle: { color: colors.grid } },
         },
         series: [
           {
@@ -992,24 +1062,24 @@ async function loadRuns(): Promise<void> {
             type: "line",
             smooth: true,
             data: runs.map((run) => run.inserted),
-            lineStyle: { color: PALETTE[0] },
-            itemStyle: { color: PALETTE[0] },
+            lineStyle: { color: colors.palette[0] },
+            itemStyle: { color: colors.palette[0] },
           },
           {
             name: "updated",
             type: "line",
             smooth: true,
             data: runs.map((run) => run.updated),
-            lineStyle: { color: PALETTE[1] },
-            itemStyle: { color: PALETTE[1] },
+            lineStyle: { color: colors.palette[1] },
+            itemStyle: { color: colors.palette[1] },
           },
           {
             name: "removed",
             type: "line",
             smooth: true,
             data: runs.map((run) => run.removed),
-            lineStyle: { color: PALETTE[3] },
-            itemStyle: { color: PALETTE[3] },
+            lineStyle: { color: colors.palette[3] },
+            itemStyle: { color: colors.palette[3] },
           },
         ],
       },
@@ -1047,6 +1117,7 @@ function setTab(tab: Tab): void {
   if (tab === "leaderboard") renderLeaderboard();
   if (tab === "trends") void loadTrend();
   if (tab === "runs") void loadRuns();
+  saveUi();
   requestAnimationFrame(resizeCharts);
 }
 
@@ -1069,10 +1140,102 @@ function showDataset(): void {
   setTab(state.tab);
 }
 
+function syncThemeButton(): void {
+  const theme = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+  const button = el<HTMLButtonElement>("#theme");
+  button.textContent = theme === "dark" ? "☀" : "☾";
+  button.title = theme === "dark" ? "切换到浅色模式" : "切换到深色模式";
+}
+
+function setTheme(theme: "dark" | "light"): void {
+  document.documentElement.dataset.theme = theme;
+  try {
+    localStorage.setItem("aa-theme", theme);
+  } catch {
+    // storage can be unavailable in private mode
+  }
+  syncThemeButton();
+  if (!state.summary) return;
+  if (state.group === "overview") renderOverview();
+  else if (state.tab === "leaderboard") renderLeaderboard();
+  else if (state.tab === "trends") void loadHistory();
+  else void loadRuns();
+  requestAnimationFrame(resizeCharts);
+}
+
+function setBusy(on: boolean): void {
+  busyCount += on ? 1 : -1;
+  el<HTMLElement>("#loading").hidden = busyCount <= 0;
+}
+
+function saveUi(): void {
+  try {
+    localStorage.setItem(
+      "aa-ui",
+      JSON.stringify({
+        group: state.group,
+        dataset: state.dataset,
+        tab: state.tab,
+        raw: state.showRaw,
+      }),
+    );
+  } catch {
+    // storage can be unavailable in private mode
+  }
+}
+
+function restoreUi(): void {
+  try {
+    const saved = JSON.parse(localStorage.getItem("aa-ui") ?? "null") as {
+      group?: string;
+      dataset?: string;
+      tab?: string;
+      raw?: boolean;
+    } | null;
+    if (!saved) return;
+    state.showRaw = saved.raw === true;
+    el<HTMLInputElement>("#raw").checked = state.showRaw;
+    const match = visibleDatasets().find((item) => item.dataset === saved.dataset);
+    if (match) {
+      state.group = match.group;
+      state.dataset = match.dataset;
+    } else if (
+      saved.group === "overview" ||
+      visibleDatasets().some((item) => item.group === saved.group)
+    ) {
+      state.group = saved.group ?? "overview";
+    }
+    if (saved.tab === "leaderboard" || saved.tab === "trends" || saved.tab === "runs") {
+      state.tab = saved.tab;
+    }
+  } catch {
+    // ignore malformed stored state
+  }
+}
+
+function startAutoRefresh(): void {
+  if (autoTimer) window.clearInterval(autoTimer);
+  autoTimer = window.setInterval(() => {
+    if (!refreshing) void refresh(false);
+  }, 60_000);
+}
+
+function stopAutoRefresh(): void {
+  if (autoTimer) window.clearInterval(autoTimer);
+  autoTimer = undefined;
+}
+
 async function refresh(force = true): Promise<void> {
+  if (refreshing) return;
+  refreshing = true;
+  setBusy(true);
   el<HTMLButtonElement>("#refresh").disabled = true;
   try {
     state.summary = await getJSON<Summary>("/api/summary");
+    if (!restoredUi) {
+      restoreUi();
+      restoredUi = true;
+    }
     renderKpis();
     fillGroupSelect();
     fillDatasetSelect();
@@ -1081,11 +1244,14 @@ async function refresh(force = true): Promise<void> {
       showOverview();
     } else {
       showDataset();
-      await loadDataset(state.dataset, force);
+      await loadDataset(state.dataset, force, false);
     }
+    saveUi();
   } catch (error) {
     toast(`刷新失败: ${error instanceof Error ? error.message : error}`, true);
   } finally {
+    setBusy(false);
+    refreshing = false;
     el<HTMLButtonElement>("#refresh").disabled = false;
   }
 }
@@ -1100,11 +1266,13 @@ function bind(): void {
     state.dataset = "";
     fillDatasetSelect();
     showDataset();
+    saveUi();
     void loadDataset(state.dataset);
   });
 
   el<HTMLSelectElement>("#dataset").addEventListener("change", (event) => {
     state.dataset = (event.target as HTMLSelectElement).value;
+    saveUi();
     void loadDataset(state.dataset);
   });
 
@@ -1159,13 +1327,16 @@ function bind(): void {
   el<HTMLInputElement>("#raw").addEventListener("change", (event) => {
     state.showRaw = (event.target as HTMLInputElement).checked;
     fillGroupSelect();
+    renderKpis();
     if (state.group === "overview") {
       showOverview();
       return;
     }
+    const previous = state.dataset;
     fillDatasetSelect();
     showDataset();
-    void loadDataset(state.dataset);
+    saveUi();
+    void loadDataset(state.dataset, false, state.dataset !== previous);
   });
 
   el<HTMLElement>("#datasets-table").addEventListener("click", (event) => {
@@ -1176,11 +1347,48 @@ function bind(): void {
     el<HTMLSelectElement>("#group").value = state.group;
     fillDatasetSelect();
     showDataset();
+    saveUi();
     void loadDataset(state.dataset);
+  });
+
+  el<HTMLButtonElement>("#theme").addEventListener("click", () => {
+    const theme = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    setTheme(theme);
+  });
+
+  el<HTMLInputElement>("#auto").addEventListener("change", (event) => {
+    const enabled = (event.target as HTMLInputElement).checked;
+    if (enabled) startAutoRefresh();
+    else stopAutoRefresh();
+    try {
+      localStorage.setItem("aa-auto", enabled ? "1" : "0");
+    } catch {
+      // ignore storage errors
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    const target = event.target as HTMLElement;
+    const typing =
+      target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA";
+    if (event.key === "/" && !typing) {
+      event.preventDefault();
+      el<HTMLInputElement>("#search").focus();
+    }
+    if (event.key === "Escape" && typing) target.blur();
   });
 
   window.addEventListener("resize", resizeCharts);
 }
 
+syncThemeButton();
 bind();
+try {
+  if (localStorage.getItem("aa-auto") === "1") {
+    el<HTMLInputElement>("#auto").checked = true;
+    startAutoRefresh();
+  }
+} catch {
+  // ignore storage errors
+}
 void refresh(true);
