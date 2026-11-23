@@ -1,0 +1,32 @@
+[project]
+name = "aa-crawler"
+version = "0.1.0"
+description = "Leaderboard crawler for artificialanalysis.ai"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["httpx>=0.28"]
+
+[dependency-groups]
+dev = ["pytest>=8.3", "ruff>=0.9"]
+
+[project.scripts]
+aa-crawler = "aa_crawler.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aa_crawler"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
