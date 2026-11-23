@@ -2,33 +2,42 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 DATA_DIR ?= data
-INTERVAL ?= 21600
+INTERVAL ?= 7200
 JITTER ?= 0.1
 PROXY ?=
+PORT ?= 8501
 PY := uv run
+WEB := web
 
-.PHONY: help install lock once daemon start stop status logs export stats datasets test lint fmt clean
+.PHONY: help install lock once daemon start stop status logs export stats datasets dashboard \
+	web-install web-check test check fmt typecheck clean
 
 help:
-	@echo "make install          install dependencies (uv sync)"
+	@echo "make install          python + bun dependencies"
 	@echo "make once             crawl all datasets once"
 	@echo "make daemon           crawl in the foreground (Ctrl-C to stop)"
-	@echo "make start            crawl in the background (nohup, logs to $(DATA_DIR)/crawler.log)"
+	@echo "make start            crawl in the background (logs to $(DATA_DIR)/crawler.log)"
 	@echo "make stop             stop the background crawler"
 	@echo "make status           check the background crawler"
 	@echo "make logs             follow the background crawler log"
+	@echo "make dashboard        open the Bun/ECharts dashboard on :$(PORT)"
 	@echo "make export           re-export the latest snapshot to $(DATA_DIR)/export"
-	@echo "make stats            show last run and latest record counts"
-	@echo "make test             run unit tests"
-	@echo "make lint fmt         check / auto-format with ruff"
+	@echo "make stats            last run and active record counts"
+	@echo "make datasets         list all datasets"
+	@echo "make test             python tests"
+	@echo "make fmt              uv format + prettier"
+	@echo "make typecheck        uv tool run ty check + bun tsc"
+	@echo "make check            format check + typecheck + tests"
 	@echo ""
 	@echo "Optional: make once PROXY=http://127.0.0.1:7890 INTERVAL=3600"
 
 install:
 	uv sync
+	cd $(WEB) && bun install
 
 lock:
 	uv lock
+	cd $(WEB) && bun install
 
 once:
 	$(PY) aa-crawler once --data-dir "$(DATA_DIR)" $(if $(PROXY),--proxy "$(PROXY)")
@@ -74,14 +83,21 @@ datasets:
 test:
 	$(PY) pytest
 
-lint:
-	$(PY) ruff check .
-	$(PY) ruff format --check .
-
 fmt:
-	$(PY) ruff check --fix .
-	$(PY) ruff format .
+	uv format
+	cd $(WEB) && bun run format
+
+typecheck:
+	uv tool run ty check
+	cd $(WEB) && bun run check
+
+check:
+	uv format --check
+	uv tool run ty check
+	$(PY) pytest
+	cd $(WEB) && bun run check
+	cd $(WEB) && bun run format:check
 
 clean:
-	rm -rf .pytest_cache .ruff_cache
+	rm -rf .pytest_cache
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

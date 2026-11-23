@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AA Data Board</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="mark">AA</span>
+          <div>
+            <strong>Data Board</strong>
+            <small>artificialanalysis.ai</small>
+          </div>
+        </div>
+        <button id="refresh" class="primary">↻ 刷新数据</button>
+        <label class="field">
+          <span>分组</span>
+          <select id="group"></select>
+        </label>
+        <label class="field">
+          <span>数据集</span>
+          <select id="dataset" disabled></select>
+        </label>
+        <nav class="tabs" id="tabs">
+          <button data-tab="leaderboard" class="active">Leaderboard</button>
+          <button data-tab="trends">Trends</button>
+          <button data-tab="runs">Runs</button>
+        </nav>
+        <div class="foot">
+          <span id="db-state">只读 SQLite</span>
+          <span>Bun + ECharts</span>
+        </div>
+      </aside>
+
+      <main>
+        <header class="top">
+          <div>
+            <h1 id="title">Artificial Analysis 数据总览</h1>
+            <p id="subtitle" class="muted">等待数据…</p>
+          </div>
+          <div id="run-badge" class="badge">…</div>
+        </header>
+
+        <section id="kpis" class="kpis"></section>
+
+        <section id="view-overview" class="view">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>每次运行变化</h2>
+              <span class="muted">inserted / updated / removed</span>
+            </div>
+            <div id="runs-chart" class="chart tall"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <h2>数据集</h2>
+              <span class="muted">点击数据集可直接打开</span>
+            </div>
+            <div id="datasets-table" class="table-wrap"></div>
+          </div>
+        </section>
+
+        <section id="view-leaderboard" class="view" hidden>
+          <div class="panel toolbar">
+            <label class="field grow">
+              <span>搜索</span>
+              <input id="search" type="search" placeholder="模型 / key / 厂商" />
+            </label>
+            <label class="field range">
+              <span>Top N <output id="topn-value">25</output></span>
+              <input id="topn" type="range" min="5" max="100" step="5" value="25" />
+            </label>
+            <label class="check"><input id="logx" type="checkbox" /> 对数 X</label>
+            <label class="field">
+              <span>指标 Y</span>
+              <select id="metric-y"></select>
+            </label>
+            <label class="field">
+              <span>指标 X</span>
+              <select id="metric-x"></select>
+            </label>
+            <button id="download" class="ghost">下载 CSV</button>
+          </div>
+          <div class="grid2">
+            <div class="panel">
+              <div class="panel-head"><h2>Top models</h2></div>
+              <div id="bar-chart" class="chart"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>Pareto</h2></div>
+              <div id="scatter-chart" class="chart"></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <h2>数据</h2>
+              <span id="row-count" class="muted"></span>
+            </div>
+            <div id="records-table" class="table-wrap"></div>
+          </div>
+        </section>
+
+        <section id="view-trends" class="view" hidden>
+          <div class="panel toolbar">
+            <label class="field grow">
+              <span>记录</span>
+              <select id="trend-record"></select>
+            </label>
+            <label class="field">
+              <span>指标</span>
+              <select id="trend-metric"></select>
+            </label>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <h2>历史变化</h2>
+              <span id="trend-hint" class="muted"></span>
+            </div>
+            <div id="trend-chart" class="chart tall"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h2>变化事件</h2></div>
+            <div id="trend-table" class="table-wrap"></div>
+          </div>
+        </section>
+
+        <section id="view-runs" class="view" hidden>
+          <div class="panel">
+            <div class="panel-head"><h2>抓取变化</h2></div>
+            <div id="dataset-runs-chart" class="chart"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h2>运行明细</h2></div>
+            <div id="dataset-runs-table" class="table-wrap"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <div id="toast" class="toast" hidden></div>
+    <script type="module" src="./app.ts"></script>
+  </body>
+</html>
