@@ -7,5 +7,13 @@
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "echarts": "^6.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.5",
+    "prettier": "^3.10.1",
+    "typescript": "^7.0.2"
   }
 }

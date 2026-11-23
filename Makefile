@@ -40,17 +40,17 @@ lock:
 	cd $(WEB) && bun install
 
 once:
-	$(PY) aa-crawler once --data-dir "$(DATA_DIR)" $(if $(PROXY),--proxy "$(PROXY)")
+	$(PY) aa-crawler --data-dir "$(DATA_DIR)" $(if $(PROXY),--proxy "$(PROXY)") once
 
 daemon:
-	$(PY) aa-crawler daemon --interval $(INTERVAL) --jitter $(JITTER) --data-dir "$(DATA_DIR)" $(if $(PROXY),--proxy "$(PROXY)")
+	$(PY) aa-crawler --data-dir "$(DATA_DIR)" $(if $(PROXY),--proxy "$(PROXY)") daemon --interval $(INTERVAL) --jitter $(JITTER)
 
 start: install
 	@mkdir -p "$(DATA_DIR)"
 	@if [ -f "$(DATA_DIR)/crawler.pid" ] && kill -0 "$$(cat "$(DATA_DIR)/crawler.pid")" 2>/dev/null; then \
 		echo "already running (pid $$(cat "$(DATA_DIR)/crawler.pid"))"; exit 1; \
 	fi
-	@nohup .venv/bin/aa-crawler daemon --interval $(INTERVAL) --jitter $(JITTER) --data-dir "$(DATA_DIR)" $(if $(PROXY),--proxy "$(PROXY)") \
+	@nohup .venv/bin/aa-crawler --data-dir "$(DATA_DIR)" $(if $(PROXY),--proxy "$(PROXY)") daemon --interval $(INTERVAL) --jitter $(JITTER) \
 		>> "$(DATA_DIR)/crawler.log" 2>&1 & echo $$! > "$(DATA_DIR)/crawler.pid"
 	@echo "started pid $$(cat "$(DATA_DIR)/crawler.pid"); log: $(DATA_DIR)/crawler.log"
 
@@ -72,13 +72,23 @@ logs:
 	@tail -n 50 -F "$(DATA_DIR)/crawler.log"
 
 export:
-	$(PY) aa-crawler export --data-dir "$(DATA_DIR)"
+	$(PY) aa-crawler --data-dir "$(DATA_DIR)" export
 
 stats:
-	$(PY) aa-crawler stats --data-dir "$(DATA_DIR)"
+	$(PY) aa-crawler --data-dir "$(DATA_DIR)" stats
 
 datasets:
 	$(PY) aa-crawler datasets
+
+web-install:
+	cd $(WEB) && bun install --frozen-lockfile
+
+dashboard: web-install
+	cd $(WEB) && AA_DB="$(abspath $(DATA_DIR)/aa.db)" AA_MANIFEST="$(abspath $(DATA_DIR)/datasets.json)" PORT=$(PORT) bun run start
+
+web-check:
+	cd $(WEB) && bun run check
+	cd $(WEB) && bun run format:check
 
 test:
 	$(PY) pytest
