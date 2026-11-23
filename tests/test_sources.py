@@ -1,6 +1,7 @@
 import json
 
-from aa_crawler.sources import Source, camel_to_kebab, extract, record_key
+from aa_crawler.extract import camel_to_kebab, extract, record_key
+from aa_crawler.sources import _src
 
 
 def page(chunks: list[str]) -> str:
@@ -21,24 +22,34 @@ def test_extract_tags_task_and_uses_slug():
             '1:{"textToImage":[{"slug":"a","elo":1},{"slug":"b","elo":2}]}',
         ]
     )
-    rows = dict(extract(payload, source))
     assert set(rows) == {"text-to-image:a", "text-to-image:b"}
     assert rows["text-to-image:a"]["task"] == "text-to-image"
 
 
-def test_extract_unwraps_and_dedupes():
-    source = Source("music_models", "/music", ("initialData",), ("id",), unwrap="values")
-    payload = page(
-        [
-            '1:{"initialData":[{"values":{"id":"x","elo":1}},{"values":{"id":"x","elo":2}}]}',
-        ]
+def test_extract_merges_arrays_and_dedupes():
+    encoder = _src(
+        "stt",
+        "speech",
+        "Speech",
+        "/stt",
+        ("hostModels", "defaultSelected"),
+        key=("id",),
     )
-    rows = dict(extract(payload, source))
-    assert list(rows) == ["x"]
-    assert rows["x"]["elo"] == 2
+    rows = dict(
+        extract(
+            page(
+                [
+                    '1:{"hostModels":[{"id":"a"},{"id":"b"},"$3a:props:x"],'
+                    '"defaultSelected":[{"id":"c"},{"id":"a"}]}'
+                ]
+            ),
+            encoder,
+        )
+    )
+    assert set(rows) == {"a", "b", "c"}
 
 
 def test_record_key_falls_back_to_id():
-    source = Source("plain", "/x", ("rows",), ("host.slug",))
-    assert record_key({"id": "abc", "host": {}}, source) == "abc"
-    assert record_key({"id": "abc", "host": {"slug": "openai"}}, source) == "openai"
+    encoder = _src("test", "other", "Test", "/test", ("rows",), key=("host.slug",))
+    assert record_key({"id": "abc", "host": {}}, encoder) == "abc"
+    assert record_key({"id": "abc", "host": {"slug": "openai"}}, encoder) == "openai"
