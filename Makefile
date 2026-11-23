@@ -5,6 +5,7 @@ DATA_DIR ?= data
 INTERVAL ?= 7200
 JITTER ?= 0.1
 PROXY ?=
+WORKERS ?= 4
 PORT ?= 8501
 PY := uv run
 WEB := web
@@ -29,7 +30,7 @@ help:
 	@echo "make typecheck        uv tool run ty check + bun tsc"
 	@echo "make check            format check + typecheck + tests"
 	@echo ""
-	@echo "Optional: make once PROXY=http://127.0.0.1:7890 INTERVAL=3600"
+	@echo "Optional: make once PROXY=http://127.0.0.1:7890 INTERVAL=3600 WORKERS=4"
 
 install:
 	uv sync
@@ -40,17 +41,17 @@ lock:
 	cd $(WEB) && bun install
 
 once:
-	$(PY) aa-crawler --data-dir "$(DATA_DIR)" $(if $(PROXY),--proxy "$(PROXY)") once
+	$(PY) aa-crawler --data-dir "$(DATA_DIR)" --workers $(WORKERS) $(if $(PROXY),--proxy "$(PROXY)") once
 
 daemon:
-	$(PY) aa-crawler --data-dir "$(DATA_DIR)" $(if $(PROXY),--proxy "$(PROXY)") daemon --interval $(INTERVAL) --jitter $(JITTER)
+	$(PY) aa-crawler --data-dir "$(DATA_DIR)" --workers $(WORKERS) $(if $(PROXY),--proxy "$(PROXY)") daemon --interval $(INTERVAL) --jitter $(JITTER)
 
 start: install
 	@mkdir -p "$(DATA_DIR)"
 	@if [ -f "$(DATA_DIR)/crawler.pid" ] && kill -0 "$$(cat "$(DATA_DIR)/crawler.pid")" 2>/dev/null; then \
 		echo "already running (pid $$(cat "$(DATA_DIR)/crawler.pid"))"; exit 1; \
 	fi
-	@nohup .venv/bin/aa-crawler --data-dir "$(DATA_DIR)" $(if $(PROXY),--proxy "$(PROXY)") daemon --interval $(INTERVAL) --jitter $(JITTER) \
+	@nohup .venv/bin/aa-crawler --data-dir "$(DATA_DIR)" --workers $(WORKERS) $(if $(PROXY),--proxy "$(PROXY)") daemon --interval $(INTERVAL) --jitter $(JITTER) \
 		>> "$(DATA_DIR)/crawler.log" 2>&1 & echo $$! > "$(DATA_DIR)/crawler.pid"
 	@echo "started pid $$(cat "$(DATA_DIR)/crawler.pid"); log: $(DATA_DIR)/crawler.log"
 

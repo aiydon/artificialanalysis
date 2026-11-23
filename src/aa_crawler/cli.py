@@ -18,6 +18,7 @@ from .store import Store, export_latest, write_manifest
 @click.option("--proxy", help="HTTP(S) proxy; empty string disables AA_PROXY")
 @click.option("--timeout", type=float, help="request timeout in seconds")
 @click.option("--retries", type=int, help="retry attempts per request")
+@click.option("--workers", type=int, help="parallel page downloads (default: 4)")
 @click.pass_context
 def cli(
     ctx: click.Context,
@@ -25,6 +26,7 @@ def cli(
     proxy: str | None,
     timeout: float | None,
     retries: int | None,
+    workers: int | None,
 ) -> None:
     """Crawl artificialanalysis.ai leaderboards into SQLite."""
     base = settings_from_env()
@@ -35,7 +37,10 @@ def cli(
         retries=base.retries if retries is None else retries,
         interval=base.interval,
         jitter=base.jitter,
+        workers=base.workers if workers is None else workers,
     )
+    if ctx.obj.workers < 1:
+        raise click.BadParameter("must be at least 1", param_hint="--workers")
 
 
 @cli.command()

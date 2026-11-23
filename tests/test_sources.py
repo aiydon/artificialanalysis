@@ -57,6 +57,12 @@ def test_extract_largest_array():
     assert set(dict(extract(html, encoder))) == {"a", "b", "c"}
 
 
+def test_extract_last_array():
+    encoder = _src("s2s", "speech", "S2S", "/s2s", ("results",), key=("id",), choose="last")
+    html = page(['1:{"results":[{"id":"first"},{"id":"x"}],"results":[{"id":"last"}]}'])
+    assert set(dict(extract(html, encoder))) == {"last"}
+
+
 def test_extract_values_mode():
     encoder = _src("music", "music", "Music", "/music", key=("id",), mode="values")
     html = page(

@@ -28,7 +28,7 @@ class Source(BaseModel):
     key: tuple[str, ...]
     unwrap: str | None = None
     task_field: bool = False
-    choose: Literal["first", "largest"] = "first"
+    choose: Literal["first", "last", "largest"] = "first"
     dashboard: bool = True
     primary: bool = False
 
@@ -56,7 +56,7 @@ def _src(
     mode: Mode = "array",
     unwrap: str | None = None,
     task_field: bool = False,
-    choose: Literal["first", "largest"] = "first",
+    choose: Literal["first", "last", "largest"] = "first",
     dashboard: bool = True,
     primary: bool = False,
 ) -> Source:
@@ -470,6 +470,23 @@ SOURCES: tuple[Source, ...] = (
         key=(),
         mode="tables",
         dashboard=False,
+    ),
+    _src(
+        "speech_to_speech_results",
+        "speech",
+        "Speech-to-speech non-agentic results",
+        "/speech-to-speech",
+        ("results",),
+        key=("id",),
+        choose="last",
+    ),
+    _src(
+        "tts_languages",
+        "speech",
+        "TTS languages",
+        "/text-to-speech/arena",
+        ("languages",),
+        key=("slug",),
     ),
     _src(
         "speech_to_speech_models",

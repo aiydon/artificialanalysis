@@ -84,7 +84,12 @@ def extract(html: str, source: Source) -> list[Row]:
             tables = array_props(payload, prop)
             if not tables:
                 raise ExtractionError(f"{source.dataset}: property {prop!r} not found")
-            table = max(tables, key=len) if source.choose == "largest" else tables[0]
+            if source.choose == "largest":
+                table = max(tables, key=len)
+            elif source.choose == "last":
+                table = tables[-1]
+            else:
+                table = tables[0]
             task = camel_to_kebab(prop) if source.task_field else None
             for raw in table:
                 record = dict(raw)

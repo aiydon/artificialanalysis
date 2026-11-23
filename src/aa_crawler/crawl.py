@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import random
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
 import time
 from collections.abc import Callable
@@ -82,32 +83,38 @@ def run_once(settings: Settings, store: Store) -> RunReport:
     )
     try:
         with Fetcher(settings.proxy, settings.timeout, settings.retries) as fetcher:
-            for path, sources in grouped.items():
-                progress.set_postfix_str(sources[0].group)
-                try:
-                    html = fetcher.get(path)
-                except Exception as exc:
-                    message = f"{type(exc).__name__}: {exc}"
-                    for source in sources:
-                        store.fail_dataset(run_id, source.dataset, message)
-                        errors[source.dataset] = message
-                    progress.update(1)
-                    continue
-
-                for source in sources:
+            with ThreadPoolExecutor(max_workers=settings.workers) as pool:
+                futures = {
+                    pool.submit(fetcher.get, path): (path, sources)
+                    for path, sources in grouped.items()
+                }
+                for future in as_completed(futures):
+                    _, sources = futures[future]
+                    progress.set_postfix_str(sources[0].group)
                     try:
-                        rows = extract(html, source)
-                        stats = store.apply_dataset(
-                            run_id, source.dataset, rows, observed_at=started_at
-                        )
-                        ok_datasets.append(source.dataset)
-                        for field in totals:
-                            totals[field] += getattr(stats, field)
+                        html = future.result()
                     except Exception as exc:
                         message = f"{type(exc).__name__}: {exc}"
-                        store.fail_dataset(run_id, source.dataset, message)
-                        errors[source.dataset] = message
-                progress.update(1)
+                        for source in sources:
+                            store.fail_dataset(run_id, source.dataset, message)
+                            errors[source.dataset] = message
+                        progress.update(1)
+                        continue
+
+                    for source in sources:
+                        try:
+                            rows = extract(html, source)
+                            stats = store.apply_dataset(
+                                run_id, source.dataset, rows, observed_at=started_at
+                            )
+                            ok_datasets.append(source.dataset)
+                            for field in totals:
+                                totals[field] += getattr(stats, field)
+                        except Exception as exc:
+                            message = f"{type(exc).__name__}: {exc}"
+                            store.fail_dataset(run_id, source.dataset, message)
+                            errors[source.dataset] = message
+                    progress.update(1)
     finally:
         progress.close()
 

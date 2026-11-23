@@ -21,6 +21,7 @@ class Settings(BaseModel):
     retries: int = 3
     interval: float = DEFAULT_INTERVAL
     jitter: float = 0.1
+    workers: int = 4
 
     @property
     def db_path(self) -> Path:
@@ -40,4 +41,5 @@ def settings_from_env() -> Settings:
         retries=int(os.getenv("AA_RETRIES", "3")),
         interval=float(os.getenv("AA_INTERVAL", str(DEFAULT_INTERVAL))),
         jitter=float(os.getenv("AA_JITTER", "0.1")),
+        workers=int(os.getenv("AA_WORKERS", "4")),
     )
