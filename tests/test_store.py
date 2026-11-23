@@ -2,7 +2,8 @@ import csv
 import json
 import sqlite3
 
-from aa_crawler.store import Store, export_latest, flatten
+from aa_crawler.sources import SOURCES
+from aa_crawler.store import Store, export_latest, flatten, write_manifest
 
 
 def test_flatten_nested_and_lists():
@@ -57,4 +58,34 @@ def test_export_latest_and_meta(tmp_path):
     record = json.loads((tmp_path / "export" / "models.jsonl").read_text().strip())
     assert record["_dataset"] == "models"
     assert record["score"] == 2
+    store.close()
+
+
+def test_legacy_database_is_archived(tmp_path):
+    path = tmp_path / "aa.db"
+    connection = sqlite3.connect(path)
+    connection.execute("CREATE TABLE observations (run_id INTEGER)")
+    connection.close()
+
+    store = Store(path)
+    store.close()
+    assert list(tmp_path.glob("aa.legacy-*.db"))
+    connection = sqlite3.connect(path)
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+    tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
+    connection.close()
+    assert {"records", "changes", "runs"} <= tables
+
+
+def test_manifest_contains_groups_and_primary(tmp_path):
+    store = Store(tmp_path / "aa.db")
+    run = store.begin("t0")
+    store.apply_dataset(run, "llm_models", [("m1", {"name": "model"})], "t1")
+    path = tmp_path / "datasets.json"
+    write_manifest(store, path, SOURCES)
+    payload = json.loads(path.read_text())
+    entry = next(item for item in payload["datasets"] if item["dataset"] == "llm_models")
+    assert entry["group"] == "llm"
+    assert entry["primary"] is True
+    assert entry["count"] == 1
     store.close()
